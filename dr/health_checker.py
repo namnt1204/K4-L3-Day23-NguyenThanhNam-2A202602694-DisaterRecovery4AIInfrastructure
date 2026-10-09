@@ -29,13 +29,96 @@ URL = {"a": "http://127.0.0.1:8001", "b": "http://127.0.0.1:8002"}
 
 
 def probe(region: str, timeout: float) -> tuple[bool, str]:
-    """TODO: trả về (ready, reason). Timeout PHẢI có — netblock làm request treo mãi."""
-    raise NotImplementedError
+    """Trả về (ready, reason). Timeout PHẢI có — netblock làm request treo mãi."""
+    url = f"{URL[region]}/readyz"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(url)
+        if resp.status_code == 200:
+            try:
+                body = resp.json()
+                if body.get("ready", True):
+                    return True, "ready"
+                reasons = body.get("reasons", [])
+                return False, ",".join(reasons) if reasons else "not_ready"
+            except Exception:
+                return True, "ready"
+        elif resp.status_code == 503:
+            try:
+                body = resp.json()
+                reasons = body.get("reasons", [])
+                return False, ",".join(reasons) if reasons else "status_503"
+            except Exception:
+                return False, "status_503"
+        else:
+            return False, f"status_{resp.status_code}"
+    except httpx.TimeoutException:
+        return False, "timeout"
+    except httpx.ConnectError:
+        return False, "connect_error"
+    except Exception as e:
+        return False, type(e).__name__
 
 
 def run(interval: float, timeout: float, threshold: int, duration: float, out: pathlib.Path):
-    """TODO: vòng lặp poll + phát hiện transition + ghi JSONL."""
-    raise NotImplementedError
+    """Vòng lặp poll + phát hiện transition + ghi JSONL."""
+    out = pathlib.Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    states = {"a": "HEALTHY", "b": "HEALTHY"}
+    fails = {"a": 0, "b": 0}
+
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        t_start = time.time()
+
+        for r in ("a", "b"):
+            ready, reason = probe(r, timeout)
+            if ready:
+                fails[r] = 0
+                if states[r] != "HEALTHY":
+                    states[r] = "HEALTHY"
+                    rec = {
+                        "event": "state_change",
+                        "ts": time.time(),
+                        "iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time())),
+                        "region": r,
+                        "to": "HEALTHY",
+                        "reason": reason,
+                        "interval_s": interval,
+                        "threshold": threshold,
+                        "consecutive_fails": 0,
+                    }
+                    with out.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps(rec) + "\n")
+                        f.flush()
+                    print("HEALTH", json.dumps(rec))
+            else:
+                fails[r] += 1
+                if fails[r] >= threshold and states[r] != "UNHEALTHY":
+                    states[r] = "UNHEALTHY"
+                    rec = {
+                        "event": "state_change",
+                        "ts": time.time(),
+                        "iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time())),
+                        "region": r,
+                        "to": "UNHEALTHY",
+                        "reason": reason,
+                        "interval_s": interval,
+                        "threshold": threshold,
+                        "consecutive_fails": fails[r],
+                    }
+                    with out.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps(rec) + "\n")
+                        f.flush()
+                    print("HEALTH", json.dumps(rec))
+
+        elapsed = time.time() - t_start
+        sleep_s = max(0.0, interval - elapsed)
+        remaining = end_time - time.time()
+        if remaining <= 0:
+            break
+        time.sleep(min(sleep_s, remaining))
 
 
 if __name__ == "__main__":
