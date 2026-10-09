@@ -38,7 +38,7 @@ Copy-Item "reports\rto-evidence.md" -Destination "$Folder\reports\rto-evidence.m
 Copy-Item "reports\runbook.md" -Destination "$Folder\reports\runbook.md" -Force
 Copy-Item "reports\postmortem.md" -Destination "$Folder\reports\postmortem.md" -Force
 
-Write-Host "Da copy 6 files vao $Folder:" -ForegroundColor Green
+Write-Host "Da copy 6 files vao ${Folder}:" -ForegroundColor Green
 Get-ChildItem -Recurse $Folder | Select-Object FullName
 
 # Tao them file zip tien cho nop bai LMS / Canvas
